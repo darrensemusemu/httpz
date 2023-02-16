@@ -1,24 +1,57 @@
 const std = @import("std");
+const stderr = std.io.getStdErr();
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
-
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
-
-    try bw.flush(); // don't forget to flush!
+    var allocator = gpa.allocator();
+    run(allocator) catch |err| {
+        try stderr.writer().print("Failed with err: {any}\n", .{err});
+        std.process.exit(1);
+    };
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+fn run(allocator: std.mem.Allocator) !void {
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
+
+    const config = try Config.init(&args);
+    const addr = try std.net.Address.parseIp(config.addr, config.port);
+    var server = std.net.StreamServer.init(.{ .reuse_address = true });
+    defer server.close();
+
+    try server.listen(addr);
+
+    while (true) {
+        var conn = try server.accept();
+        defer conn.stream.close();
+
+        _ = try conn.stream.write("Hello darkneses my old friend:");
+        std.log.info("recieved conn ", .{});
+    }
 }
+
+const Config = struct {
+    addr: []const u8 = "0.0.0.0",
+    port: u16 = 8080,
+    file_path: []const u8,
+
+    const Self = @This();
+
+    fn init(args: *std.process.ArgIterator) !Config {
+        const exe_name = args.next().?;
+        const file_path = args.next() orelse {
+            try usage(exe_name);
+            return error.ConfigFileNotFound;
+        };
+        return Config{ .file_path = file_path };
+    }
+
+    fn usage(exe_name: []const u8) !void {
+        try stderr.writer().print(
+            \\ Usage:
+            \\  {s} <config_file>
+        , .{exe_name});
+    }
+};

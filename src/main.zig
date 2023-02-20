@@ -1,34 +1,47 @@
 const std = @import("std");
+const mem = std.mem;
+const net = std.net;
 const stderr = std.io.getStdErr();
+
+const http_request = @import("http_request.zig");
+const HttpRequest = http_request.HttpRequest;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
 
     var allocator = gpa.allocator();
-    run(allocator) catch |err| {
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
+
+    run(&args) catch |err| {
         try stderr.writer().print("Failed with err: {any}\n", .{err});
         std.process.exit(1);
     };
 }
 
-fn run(allocator: std.mem.Allocator) !void {
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
-
-    const config = try Config.init(&args);
-    const addr = try std.net.Address.parseIp(config.addr, config.port);
-    var server = std.net.StreamServer.init(.{ .reuse_address = true });
+fn run(args: *std.process.ArgIterator) !void {
+    const config = try Config.init(args);
+    const addr = try net.Address.parseIp(config.addr, config.port);
+    var server = net.StreamServer.init(.{ .reuse_address = true });
     defer server.close();
 
     try server.listen(addr);
 
     while (true) {
-        var conn = try server.accept();
-        defer conn.stream.close();
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        var allocator = arena.allocator();
 
-        _ = try conn.stream.write("Hello darkneses my old friend:");
-        std.log.info("recieved conn ", .{});
+        var conn = server.accept() catch |err| {
+            std.log.err("Failed to accect connection: {any}", .{err});
+            continue;
+        };
+
+        handleRequest(allocator, &conn) catch |err| {
+            std.log.err("Failed to handle request {any}", .{err});
+            continue;
+        };
     }
 }
 
@@ -40,9 +53,9 @@ const Config = struct {
     const Self = @This();
 
     fn init(args: *std.process.ArgIterator) !Config {
-        const exe_name = args.next().?;
+        //const exe_name = args.next().?;
         const file_path = args.next() orelse {
-            try usage(exe_name);
+            // try usage(exe_name); TODO : require config filename
             return error.ConfigFileNotFound;
         };
         return Config{ .file_path = file_path };
@@ -55,3 +68,13 @@ const Config = struct {
         , .{exe_name});
     }
 };
+
+fn handleRequest(allocator: mem.Allocator, conn: *net.StreamServer.Connection) !void {
+    defer conn.stream.close();
+
+    _ = try HttpRequest.init(allocator, conn);
+}
+
+test "_" {
+    _ = http_request;
+}

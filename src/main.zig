@@ -72,7 +72,10 @@ const Config = struct {
 fn handleRequest(allocator: mem.Allocator, conn: *net.StreamServer.Connection) !void {
     defer conn.stream.close();
 
-    _ = try HttpRequest.init(allocator, conn);
+    var req = try HttpRequest.init(allocator, conn);
+    if (req.body) |b| {
+        std.debug.print("receviend bpdy: '{s}'\n", .{b.items});
+    }
 }
 
 test "_" {

@@ -3,7 +3,10 @@ const http = std.http;
 const meta = std.meta;
 const mem = std.mem;
 const net = std.net;
+const io = std.io;
 const testing = std.testing;
+
+const utils = @import("utils.zig");
 
 pub const HttpRequest = struct {
     allocator: mem.Allocator,
@@ -12,12 +15,48 @@ pub const HttpRequest = struct {
     url: []const u8,
     version: http.Version,
     headers: HeaderMap,
+    body: ?Body,
 
     const Self = @This();
+
+    pub const Body = std.ArrayList(u8);
 
     pub const HeaderMap = std.StringHashMap([]const u8);
 
     const max_usize = std.math.maxInt(usize);
+
+    pub fn init(allocator: mem.Allocator, conn: *net.StreamServer.Connection) !HttpRequest {
+        var reader = conn.stream.reader();
+
+        var method = try parseMethod(allocator, reader);
+        var url = try parseUrl(allocator, reader);
+        var version = try parseHttpVersion(allocator, reader);
+        var headers = try parseHeaders(allocator, reader);
+        var body: ?Body = null;
+
+        if (method.requestHasBody()) {
+            body = try parseBody(allocator, reader, &headers);
+        }
+
+        return HttpRequest{
+            .allocator = allocator,
+            .conn = conn,
+            .method = method,
+            .url = url,
+            .version = version,
+            .headers = headers,
+            .body = body,
+        };
+    }
+
+    pub fn parseBody(allocator: mem.Allocator, reader: anytype, headers: *HeaderMap) !?Body {
+        var content_length_str = headers.get("Content-Length") orelse return null;
+        var len = std.fmt.parseUnsigned(u32, content_length_str, 0) catch return error.BadRequest;
+        var body = try Body.initCapacity(allocator, len);
+        try body.appendNTimes(0, len); // fill body
+        _ = try reader.readNoEof(body.items);
+        return body;
+    }
 
     fn parseMethod(allocator: mem.Allocator, reader: anytype) !http.Method {
         var req_method = try reader.readUntilDelimiterAlloc(allocator, ' ', max_usize);
@@ -30,31 +69,14 @@ pub const HttpRequest = struct {
 
     fn parseHttpVersion(allocator: mem.Allocator, reader: anytype) !http.Version {
         var req_version = try reader.readUntilDelimiterAlloc(allocator, '\r', max_usize);
-        return meta.stringToEnum(http.Version, req_version) orelse return error.UnknownHttpVersion;
-    }
-
-    fn parseEndofLine(allocator: mem.Allocator, reader: anytype) !void {
-        _ = try reader.readUntilDelimiterAlloc(allocator, '\n', max_usize);
-    }
-
-    pub fn init(allocator: mem.Allocator, conn: *net.StreamServer.Connection) !HttpRequest {
-        var reader = conn.stream.reader();
-
-        var method = try parseMethod(allocator, reader);
-        var url = try parseUrl(allocator, reader);
-        var version = try parseHttpVersion(allocator, reader);
-        try parseEndofLine(allocator, reader);
-
-        var headers = try parseHeaders(allocator, reader);
-
-        return HttpRequest{
-            .allocator = allocator,
-            .conn = conn,
-            .method = method,
-            .url = url,
-            .version = version,
-            .headers = headers,
+        const version = meta.stringToEnum(http.Version, req_version) orelse return error.UnknownHttpVersion;
+        reader.skipBytes(1, .{}) catch |err| {
+            switch (err) {
+                error.EndOfStream => {},
+                else => return err,
+            }
         };
+        return version;
     }
 
     fn parseHeaders(allocator: mem.Allocator, reader: anytype) !HeaderMap {
@@ -75,47 +97,14 @@ pub const HttpRequest = struct {
                 };
             };
 
-            if (line.len == 0) {
-                break;
-            }
-
+            if (line.len == 0) return headers;
             var split_iter = mem.split(u8, line, ":");
-            var key = split_iter.next() orelse return error.HeaderKeyNotFound;
+            var key = split_iter.next() orelse return error.HeaderKeyNotFound; // TODO: handle case insetivity
             var value = split_iter.next() orelse return error.HeaderValueNotFound;
             try headers.put(key, mem.trim(u8, value, " "));
         }
+
         return headers;
-    }
-};
-
-const TestStringReader = struct {
-    content: []const u8,
-    pos: u64 = 0,
-
-    const Self = @This();
-
-    fn initFromString(str: []const u8) TestStringReader {
-        return Self{ .content = str[0..] };
-    }
-
-    fn readFn(self: *Self, buf: []u8) ReadError!usize {
-        if (self.content.len == 0 or self.pos >= self.content.len - 1) return 0;
-
-        var remaining_len: usize = self.content.len - (self.pos + 1);
-        if (remaining_len == 0) return 0;
-
-        var n_read = if (buf.len <= self.content.len) buf.len else remaining_len;
-        mem.copy(u8, buf, self.content[self.pos .. self.pos + n_read]);
-        self.pos += n_read;
-        return n_read;
-    }
-
-    pub const ReadError = error{ReadError};
-
-    pub const Reader = std.io.Reader(*Self, ReadError, readFn);
-
-    pub fn reader(self: *Self) Reader {
-        return Reader{ .context = self };
     }
 };
 
@@ -124,7 +113,7 @@ test "HttpRequest parse request line" {
     defer area.deinit();
     var allocator = area.allocator();
 
-    var t = TestStringReader.initFromString("GET /images/logo.png HTTP/1.1\r\n");
+    var t = utils.TestStringReader.initFromString("GET /images/logo.png HTTP/1.1\r\n");
     const method = try HttpRequest.parseMethod(allocator, t.reader());
     try testing.expectEqual(method, http.Method.GET);
 
@@ -140,11 +129,11 @@ test "HttpRequest.parseHeaders()" {
     defer area.deinit();
     var allocator = area.allocator();
 
-    var t = TestStringReader.initFromString("");
+    var t = utils.TestStringReader.initFromString("");
     var headers = try HttpRequest.parseHeaders(allocator, t.reader());
     try testing.expectEqual(headers.count(), 0);
 
-    t = TestStringReader.initFromString("Host: www.example.com\r\nContent-type: application/json\r\n\r\n");
+    t = utils.TestStringReader.initFromString("Host: www.example.com\r\nContent-type: application/json\r\n\r\n");
     headers = try HttpRequest.parseHeaders(allocator, t.reader());
     try testing.expectEqual(headers.count(), 2);
     try testing.expectEqualStrings(headers.get("Host") orelse "", "www.example.com");

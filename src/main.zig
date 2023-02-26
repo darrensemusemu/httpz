@@ -40,12 +40,16 @@ fn run(args: *std.process.ArgIterator) !void {
             try res.body.appendSlice("Hello World");
         }
 
-        fn handleJson(res: *response.HttpResponse, _: *request.HttpRequest) !void {
+        fn handleJson(res: *response.HttpResponse, req: *request.HttpRequest) !void {
             res.status = .ok;
-            try res.setHeader("Content-Type", "application/json");
-            try res.body.appendSlice(
-                \\{"status": "ok"}
-            );
+
+            switch (req.method) {
+                .GET => {
+                    try res.setHeader("Content-Type", "application/json");
+                    try res.body.appendSlice("{\"status\": \"ok\"}");
+                },
+                else => res.status = std.http.Status.method_not_allowed,
+            }
         }
 
         fn handle404(res: *response.HttpResponse, _: *request.HttpRequest) !void {

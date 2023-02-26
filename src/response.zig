@@ -6,7 +6,6 @@ const testing = std.testing;
 pub const HttpResponse = struct {
     status: http.Status = .ok,
     body: Body,
-    method: http.Method = .GET,
     headers: HeaderMap,
 
     const Self = @This();

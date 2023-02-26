@@ -27,7 +27,7 @@ fn run(args: *std.process.ArgIterator) !void {
 
     var allocator = arena.allocator();
 
-    const config = try Config.init(args);
+    const config = Config.init(args);
     const addr = try net.Address.parseIp(config.addr, config.port);
 
     var http_server = server.HttpServer.init(allocator, addr);
@@ -35,36 +35,50 @@ fn run(args: *std.process.ArgIterator) !void {
 
     const t = struct {
         fn handleHome(res: *response.HttpResponse, _: *request.HttpRequest) !void {
+            res.status = .ok;
+            try res.setHeader("Content-Type", "text/plain");
             try res.body.appendSlice("Hello World");
+        }
+
+        fn handleJson(res: *response.HttpResponse, _: *request.HttpRequest) !void {
+            res.status = .ok;
+            try res.setHeader("Content-Type", "application/json");
+            try res.body.appendSlice(
+                \\{"status": "ok"}
+            );
+        }
+
+        fn handle404(res: *response.HttpResponse, _: *request.HttpRequest) !void {
+            res.status = .not_found;
+            try res.setHeader("Content-Type", "text/html");
+            try res.body.appendSlice(
+                \\<html>
+                \\  <head>
+                \\      <title>404</Title>
+                \\  </head>
+                \\  <body>
+                \\      <h3 style="text-align: center">404</h3>
+                \\  </body>
+                \\</html>
+            );
         }
     };
 
     var mux = server.Mux.init(allocator);
     try mux.handle("/", t.handleHome);
+    try mux.handle("/status.json", t.handleJson);
+    try mux.handle("/404", t.handle404);
     try http_server.listenAndServe(&mux);
 }
 
 const Config = struct {
     addr: []const u8 = "0.0.0.0",
     port: u16 = 8080,
-    file_path: []const u8,
 
     const Self = @This();
 
-    fn init(args: *std.process.ArgIterator) !Config {
-        //const exe_name = args.next().?;
-        const file_path = args.next() orelse {
-            // try usage(exe_name); TODO : require config filename
-            return error.ConfigFileNotFound;
-        };
-        return Config{ .file_path = file_path };
-    }
-
-    fn usage(exe_name: []const u8) !void {
-        try stderr.writer().print(
-            \\ Usage:
-            \\  {s} <config_file>
-        , .{exe_name});
+    fn init(_: *std.process.ArgIterator) Self {
+        return Self{};
     }
 };
 

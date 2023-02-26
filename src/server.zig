@@ -11,16 +11,14 @@ const HttpResponse = response.HttpResponse;
 
 fn defaultHandler(res: *HttpResponse, _: *HttpRequest) !void {
     res.status = .not_found;
+    try res.setHeader("Content-Type", "application/json");
     try res.body.appendSlice(
-        \\<!DOCTYPE html>
-        \\<html>
-        \\  <head>
-        \\      <title>httpdir</title>
-        \\  </head>
-        \\  <body>
-        \\      <h1>httpdir</h1>
-        \\  </body>
-        \\</html>
+        \\{
+        \\  "status": "404",
+        \\  "type": "about:blank",
+        \\  "title": "Not Found",
+        \\  "detail": "Resource not found"
+        \\}
     );
 }
 
@@ -55,23 +53,6 @@ pub const Mux = struct {
         return self.handlers.get(pattern);
     }
 };
-
-test "mux" {
-    var area = std.heap.ArenaAllocator.init(testing.allocator);
-    defer area.deinit();
-    var allocator = area.allocator();
-
-    const t = struct {
-        fn handleHome(_: *HttpResponse, _: *HttpRequest) !void {}
-    };
-
-    var mux = Mux.init(allocator);
-    try mux.handle("/", defaultHandler);
-    try mux.handle("/home", t.handleHome);
-    var res = mux.handle("/home", t.handleHome);
-    try testing.expectError(MuxError.HandlerExists, res);
-}
-
 pub const HttpServer = struct {
     allocator: mem.Allocator,
     addr: net.Address,
@@ -122,22 +103,34 @@ pub const HttpServer = struct {
             try handler(&res, &req);
         } else try defaultHandler(&res, &req);
 
-        var writer = conn.stream.writer();
-        try std.fmt.format(writer, "{s} {d} {s}\r\nContent-Length: {d}", .{
-            @tagName(self.http_version),
-            @enumToInt(res.status),
-            res.status.phrase() orelse "",
-            res.body.items.len,
-        });
-
-        var buffered_writer = std.io.bufferedWriter(writer);
+        var buffered_writer = std.io.bufferedWriter(conn.stream.writer());
         defer buffered_writer.flush() catch |err| {
             std.log.err("Failed to flush buffered writer: {any}", .{err});
         };
 
-        _ = try buffered_writer.write("\r\n\r\n");
+        var writer = buffered_writer.writer();
+
+        // write response line
+        try writer.print("{s} {d} {s}\r\n", .{
+            @tagName(self.http_version),
+            @enumToInt(res.status),
+            res.status.phrase() orelse "",
+        });
+
+        // content length
+        try writer.print("Content-Length: {d}\r\n", .{res.contentLength()});
+
+        var header_iter = res.headers.iterator();
+        while (header_iter.next()) |entry| {
+            try writer.print("{s}: {s}\r\n", .{
+                entry.key_ptr.*,
+                entry.value_ptr.*,
+            });
+        }
+
+        _ = try writer.write("\r\n");
         if (res.body.items.len > 0) {
-            _ = try buffered_writer.write(res.body.items);
+            _ = try writer.write(res.body.items);
         }
     }
 
@@ -145,3 +138,19 @@ pub const HttpServer = struct {
         self.streamServer.close();
     }
 };
+
+test "mux" {
+    var area = std.heap.ArenaAllocator.init(testing.allocator);
+    defer area.deinit();
+    var allocator = area.allocator();
+
+    const t = struct {
+        fn handleHome(_: *HttpResponse, _: *HttpRequest) !void {}
+    };
+
+    var mux = Mux.init(allocator);
+    try mux.handle("/", defaultHandler);
+    try mux.handle("/home", t.handleHome);
+    var res = mux.handle("/home", t.handleHome);
+    try testing.expectError(MuxError.HandlerExists, res);
+}

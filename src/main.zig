@@ -33,7 +33,15 @@ fn run(args: *std.process.ArgIterator) !void {
     var http_server = server.HttpServer.init(allocator, addr);
     defer http_server.close();
 
-    try http_server.listenAndServe();
+    const t = struct {
+        fn handleHome(res: *response.HttpResponse, _: *request.HttpRequest) !void {
+            try res.body.appendSlice("Hello World");
+        }
+    };
+
+    var mux = server.Mux.init(allocator);
+    try mux.handle("/", t.handleHome);
+    try http_server.listenAndServe(&mux);
 }
 
 const Config = struct {

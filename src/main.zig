@@ -3,8 +3,9 @@ const mem = std.mem;
 const net = std.net;
 const stderr = std.io.getStdErr();
 
-const http_request = @import("http_request.zig");
-const HttpRequest = http_request.HttpRequest;
+const request = @import("request.zig");
+const response = @import("response.zig");
+const server = @import("server.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -21,28 +22,18 @@ pub fn main() !void {
 }
 
 fn run(args: *std.process.ArgIterator) !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    var allocator = arena.allocator();
+
     const config = try Config.init(args);
     const addr = try net.Address.parseIp(config.addr, config.port);
-    var server = net.StreamServer.init(.{ .reuse_address = true });
-    defer server.close();
 
-    try server.listen(addr);
+    var http_server = server.HttpServer.init(allocator, addr);
+    defer http_server.close();
 
-    while (true) {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-        var allocator = arena.allocator();
-
-        var conn = server.accept() catch |err| {
-            std.log.err("Failed to accect connection: {any}", .{err});
-            continue;
-        };
-
-        handleRequest(allocator, &conn) catch |err| {
-            std.log.err("Failed to handle request {any}", .{err});
-            continue;
-        };
-    }
+    try http_server.listenAndServe();
 }
 
 const Config = struct {
@@ -69,15 +60,8 @@ const Config = struct {
     }
 };
 
-fn handleRequest(allocator: mem.Allocator, conn: *net.StreamServer.Connection) !void {
-    defer conn.stream.close();
-
-    var req = try HttpRequest.init(allocator, conn);
-    if (req.body) |b| {
-        std.debug.print("receviend bpdy: '{s}'\n", .{b.items});
-    }
-}
-
 test "_" {
-    _ = http_request;
+    _ = request;
+    _ = response;
+    _ = server;
 }

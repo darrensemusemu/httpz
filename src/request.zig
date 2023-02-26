@@ -10,7 +10,6 @@ const utils = @import("utils.zig");
 
 pub const HttpRequest = struct {
     allocator: mem.Allocator,
-    conn: *net.StreamServer.Connection,
     method: http.Method,
     url: []const u8,
     version: http.Version,
@@ -25,9 +24,7 @@ pub const HttpRequest = struct {
 
     const max_usize = std.math.maxInt(usize);
 
-    pub fn init(allocator: mem.Allocator, conn: *net.StreamServer.Connection) !HttpRequest {
-        var reader = conn.stream.reader();
-
+    pub fn init(allocator: mem.Allocator, reader: net.Stream.Reader) !HttpRequest {
         var method = try parseMethod(allocator, reader);
         var url = try parseUrl(allocator, reader);
         var version = try parseHttpVersion(allocator, reader);
@@ -40,7 +37,6 @@ pub const HttpRequest = struct {
 
         return HttpRequest{
             .allocator = allocator,
-            .conn = conn,
             .method = method,
             .url = url,
             .version = version,

@@ -22,15 +22,24 @@ fn run() !void {
     defer http_server.close();
 
     const t = struct {
-        fn handleHome(res: *httpz.Response, _: *httpz.Request) anyerror!void {
+        fn handleJson(res: *httpz.Response, req: *httpz.Request) !void {
             res.status = .ok;
-            try res.setHeader("Content-Type", "text/plain");
-            try res.body.appendSlice("Hello World");
+            switch (req.method) {
+                .GET => {
+                    try res.setHeader("Content-Type", "application/json");
+                    try res.body.appendSlice("{\"status\": \"ok\"}");
+                },
+                .POST => {
+                    //...
+                    try res.body.appendSlice("{\"id\": \"99\"}");
+                },
+                else => res.status = .method_not_allowed,
+            }
         }
     };
 
     var mux = httpz.Mux.init(allocator);
-    try mux.handle("/", t.handleHome);
+    try mux.handle("/status", t.handleJson);
 
     std.log.info("running on port: 8080", .{});
     try http_server.listenAndServe(&mux);

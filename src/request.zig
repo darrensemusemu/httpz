@@ -8,7 +8,7 @@ const testing = std.testing;
 
 const utils = @import("utils.zig");
 
-pub const HttpRequest = struct {
+pub const Request = struct {
     allocator: mem.Allocator,
     method: http.Method,
     url: []const u8,
@@ -24,7 +24,7 @@ pub const HttpRequest = struct {
 
     const max_usize = std.math.maxInt(usize);
 
-    pub fn init(allocator: mem.Allocator, reader: net.Stream.Reader) !HttpRequest {
+    pub fn init(allocator: mem.Allocator, reader: net.Stream.Reader) !Self {
         var method = try parseMethod(allocator, reader);
         var url = try parseUrl(allocator, reader);
         var version = try parseHttpVersion(allocator, reader);
@@ -35,7 +35,7 @@ pub const HttpRequest = struct {
             body = try parseBody(allocator, reader, &headers);
         }
 
-        return HttpRequest{
+        return Self{
             .allocator = allocator,
             .method = method,
             .url = url,
@@ -45,7 +45,7 @@ pub const HttpRequest = struct {
         };
     }
 
-    pub fn parseBody(allocator: mem.Allocator, reader: anytype, headers: *HeaderMap) !?Body {
+    fn parseBody(allocator: mem.Allocator, reader: anytype, headers: *HeaderMap) !?Body {
         var content_length_str = headers.get("Content-Length") orelse return null;
         var len = std.fmt.parseUnsigned(u32, content_length_str, 0) catch return error.BadRequest;
         var body = try Body.initCapacity(allocator, len);
@@ -104,33 +104,33 @@ pub const HttpRequest = struct {
     }
 };
 
-test "HttpRequest parse request line" {
+test "Request parse request line" {
     var area = std.heap.ArenaAllocator.init(testing.allocator);
     defer area.deinit();
     var allocator = area.allocator();
 
     var t = utils.TestStringReader.initFromString("GET /images/logo.png HTTP/1.1\r\n");
-    const method = try HttpRequest.parseMethod(allocator, t.reader());
+    const method = try Request.parseMethod(allocator, t.reader());
     try testing.expectEqual(method, http.Method.GET);
 
-    const url = try HttpRequest.parseUrl(allocator, t.reader());
+    const url = try Request.parseUrl(allocator, t.reader());
     try testing.expectEqualStrings(url, "/images/logo.png");
 
-    const version = try HttpRequest.parseHttpVersion(allocator, t.reader());
+    const version = try Request.parseHttpVersion(allocator, t.reader());
     try testing.expectEqual(version, http.Version.@"HTTP/1.1");
 }
 
-test "HttpRequest.parseHeaders()" {
+test "Request.parseHeaders()" {
     var area = std.heap.ArenaAllocator.init(testing.allocator);
     defer area.deinit();
     var allocator = area.allocator();
 
     var t = utils.TestStringReader.initFromString("");
-    var headers = try HttpRequest.parseHeaders(allocator, t.reader());
+    var headers = try Request.parseHeaders(allocator, t.reader());
     try testing.expectEqual(headers.count(), 0);
 
     t = utils.TestStringReader.initFromString("Host: www.example.com\r\nContent-type: application/json\r\n\r\n");
-    headers = try HttpRequest.parseHeaders(allocator, t.reader());
+    headers = try Request.parseHeaders(allocator, t.reader());
     try testing.expectEqual(headers.count(), 2);
     try testing.expectEqualStrings(headers.get("Host") orelse "", "www.example.com");
     try testing.expectEqualStrings(headers.get("Content-type") orelse "", "application/json");

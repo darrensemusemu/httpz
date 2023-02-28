@@ -3,7 +3,7 @@ const http = std.http;
 const mem = std.mem;
 const testing = std.testing;
 
-pub const HttpResponse = struct {
+pub const Response = struct {
     status: http.Status = .ok,
     body: Body,
     headers: HeaderMap,
@@ -39,7 +39,7 @@ test "http response" {
     defer area.deinit();
     var allocator = area.allocator();
 
-    var res = HttpResponse.init(allocator);
+    var res = Response.init(allocator);
 
     try res.setHeader("Content-Type", "text/html");
     try res.setHeader("Authorization", "Basic 0123456789");

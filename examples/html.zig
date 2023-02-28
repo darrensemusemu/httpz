@@ -22,15 +22,25 @@ fn run() !void {
     defer http_server.close();
 
     const t = struct {
-        fn handleHome(res: *httpz.Response, _: *httpz.Request) anyerror!void {
+        fn handleHtml(res: *httpz.Response, _: *httpz.Request) !void {
             res.status = .ok;
-            try res.setHeader("Content-Type", "text/plain");
-            try res.body.appendSlice("Hello World");
+            try res.setHeader("Content-Type", "text/html");
+            try res.body.appendSlice(
+                \\<!DOCTYPE html>
+                \\<html>
+                \\  <head>
+                \\      <title>Homt</Title>
+                \\  </head>
+                \\  <body>
+                \\      <h3 style="text-align: center">Hello World!</h3>
+                \\  </body>
+                \\</html>
+            );
         }
     };
 
     var mux = httpz.Mux.init(allocator);
-    try mux.handle("/", t.handleHome);
+    try mux.handle("/home", t.handleHtml);
 
     std.log.info("running on port: 8080", .{});
     try http_server.listenAndServe(&mux);

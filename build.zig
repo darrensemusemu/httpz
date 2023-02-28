@@ -6,10 +6,10 @@ pub fn build(b: *std.Build) void {
 
     b.addModule(.{ .name = "httpz", .source_file = .{ .path = "src/main.zig" } });
 
-    inline for (.{"simple"}) |name| {
+    inline for (.{ "simple", "json", "html" }) |name| {
         const example = b.addExecutable(.{
             .name = name,
-            .root_source_file = .{ .path = "examples/simple.zig" },
+            .root_source_file = .{ .path = "examples/" ++ name ++ ".zig" },
             .target = target,
             .optimize = optimize,
         });
@@ -17,7 +17,7 @@ pub fn build(b: *std.Build) void {
         example.install();
 
         const example_run_cmd = b.addRunArtifact(example);
-        const example_step = b.step(name, "Run and serve example");
+        const example_step = b.step("run:" ++ name, "Run and serve example");
         example_step.dependOn(&example_run_cmd.step);
     }
 
@@ -26,6 +26,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    main_tests.emit_docs = .{ .emit_to = "docs/" };
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
 }
